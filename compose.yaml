@@ -19,6 +19,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mlflow:
+        condition: service_healthy
 
   db:
     image: public.ecr.aws/docker/library/postgres:17-alpine
@@ -98,13 +100,19 @@ services:
     command: >
       -c "pip install psycopg2-binary boto3 && mlflow server
       --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      --default-artifact-root s3://selic_data/mlflow/
+      --default-artifact-root s3://selic-data/mlflow/
       --host 0.0.0.0 --allowed-hosts mlflow:5000,mlflow,localhost:5001"
     depends_on:
       db:
         condition: service_healthy
       storage:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
 volumes:
   selic-postgres-data:

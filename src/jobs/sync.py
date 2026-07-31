@@ -55,6 +55,15 @@ def sync_selic(db: Session, data_inicial: str, data_final: str) -> dict:
 
         response = requests.get(url, timeout=60)
         response.raise_for_status()
+
+        if not response.text.strip():
+            logger.warning(
+                f"API retornou vazio para o bloco {bloco_inicial_str} a {bloco_final_str} — "
+                "sem dados nesse intervalo, pulando para o próximo bloco."
+            )
+            cursor = bloco_final + timedelta(days=1)
+            continue
+
         dados = response.json()
         total_recebidos += len(dados)
 
@@ -120,11 +129,3 @@ if __name__ == "__main__":
     finally:
         db.close()
 
-response = requests.get(url, timeout=60)
-response.raise_for_status()
-
-if not response.text.strip():
-    logger.warning(f"API retornou vazio para o período {data_inicial} a {data_final} — sem dados nesse intervalo.")
-    dados = []
-else:
-    dados = response.json()
