@@ -98,7 +98,7 @@ Criar um pipeline de dados completo e robusto que:
 │       ├── admin.py       # Dashboard, sync, transform, load-db, load-s3
 │       ├── selic.py       # Consulta do histórico da Selic
 │       ├── s3_status.py   # Status do Garage S3 e gap analysis
-│       ├── ml_serving.py  # Model Serving (carrega de MLflow no startup)
+│       ├── ml_serving.py  # Model Serving (previsão manual e automática, carrega de MLflow no startup)
 │       └── ml_tracking.py # Gerenciamento de experimentos MLflow
 └── tests/
     ├── test_unit.py       # Testes unitários (features de série temporal)
@@ -167,7 +167,28 @@ Após rodar `make train`, reinicie a API para que ela carregue a versão mais re
 podman compose restart api
 ```
 
-Aguarde alguns segundos e teste o endpoint de previsão, enviando valores de exemplo como features:
+Aguarde alguns segundos antes de testar.
+
+**Opção 1 — Automática, usando os dados reais mais recentes (recomendado):**
+
+A API busca sozinha os últimos valores sincronizados e calcula a previsão, sem precisar montar nenhum payload:
+
+```bash
+curl -s -X POST http://localhost:8000/predict/latest | python3 -m json.tool
+```
+
+Resposta esperada:
+
+```json
+{
+    "valor_previsto": 14.25,
+    "message": "Predição realizada com sucesso, usando dados reais até 2025-12-31."
+}
+```
+
+**Opção 2 — Manual, com valores customizados:**
+
+Útil para simular cenários hipotéticos, enviando você mesmo os valores de lag e média móvel:
 
 ```bash
 curl -s -X POST http://localhost:8000/predict/ \
@@ -182,24 +203,12 @@ curl -s -X POST http://localhost:8000/predict/ \
   }' | python3 -m json.tool
 ```
 
-A resposta esperada é algo como:
-
-```json
-{
-    "valor_previsto": 10.74,
-    "message": "Predição realizada com sucesso."
-}
-```
-
-> 💡 Você também pode testar pelo Swagger UI (http://localhost:8000/docs), procurando o endpoint `POST /predict/` e usando o botão "Try it out" — mais visual e sem precisar do terminal.
-
-**Usando dados reais em vez dos valores de exemplo:** os valores acima são fictícios, apenas para validar que o endpoint responde. Para obter uma previsão baseada no estado real e atual da série, consulte primeiro o histórico:
-
-```bash
-curl -s "http://localhost:8000/selic/historico?limit=10" | python3 -m json.tool
-```
-
-Isso retorna os últimos valores reais sincronizados, do mais recente para o mais antigo. Monte o payload usando esses valores na ordem correta (`lag_1` = valor mais recente, `lag_2` = valor anterior a esse, e assim por diante) e calcule `media_movel_7` como a média aritmética dos 7 valores mais recentes.
+> 💡 Você também pode testar pelo Swagger UI (http://localhost:8000/docs), procurando os endpoints `POST /predict/` e `POST /predict/latest` e usando o botão "Try it out" — mais visual e sem precisar do terminal.
+>
+> 💡 Se os acentos aparecerem escapados (`\u00e9` em vez de "é") na saída do `json.tool`, use este comando alternativo para exibir com acentuação normal:
+> ```bash
+> curl -s -X POST http://localhost:8000/predict/latest | python3 -c "import json, sys; print(json.dumps(json.load(sys.stdin), ensure_ascii=False, indent=2))"
+> ```
 
 ---
 
@@ -256,7 +265,8 @@ curl -s http://localhost:8000/admin/sync | python3 -m json.tool
 | `GET` | `/selic/historico` | Histórico recente da Selic |
 | `GET` | `/selic/ultimo` | Último valor sincronizado |
 | `GET` | `/selic/periodo?data_inicial=...&data_final=...` | Busca por intervalo de datas |
-| `POST` | `/predict/` | Previsão do próximo valor da Selic via modelo carregado do MLflow |
+| `POST` | `/predict/` | Previsão do próximo valor da Selic, com features informadas manualmente |
+| `POST` | `/predict/latest` | Previsão automática, usando os últimos valores reais sincronizados no banco |
 
 Documentação completa com exemplos: **http://localhost:8000/docs**
 
@@ -290,6 +300,7 @@ Consulte os ADRs em `docs/adr/`:
 - **`repository path '/app' is not owned by current user` ao rodar `dvc`/`git`**: rode `podman compose exec -u root api git config --global --add safe.directory /app` uma vez, para autorizar o diretório.
 - **API demorando minutos para responder após `make up`**: normalmente indica que o MLflow ainda não está pronto e a API está tentando carregar o modelo repetidamente. Confirme que o serviço `mlflow` está `healthy` com `podman compose ps` antes de considerar a API travada.
 - **Erro de memória (`exit status 137`) em `make data-quality` ou outros comandos pesados**: aumente a memória da VM do Podman, por exemplo `podman machine set --memory 10240` (ajuste conforme a RAM disponível na sua máquina).
+- **`/predict/latest` retornando erro 422 (dados insuficientes)**: sincronize mais histórico com `make sync`, garantindo pelo menos 7 dias úteis de dados na tabela `selic_serie`.
 
 ---
 
