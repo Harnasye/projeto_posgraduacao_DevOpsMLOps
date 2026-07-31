@@ -1,0 +1,6 @@
+outs:
+- md5: 276146dc53146f41aaede204ec4fb2b9.dir
+  size: 81238
+  nfiles: 1
+  hash: md5
+  path: selic
