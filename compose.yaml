@@ -1,0 +1,113 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: ContainerFile
+    image: fastapi-selic:latest
+    container_name: fastapi_selic_api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - AWS_ACCESS_KEY_ID=${S3_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${S3_SECRET_KEY}
+      - MLFLOW_S3_ENDPOINT_URL=${S3_ENDPOINT_URL}
+    volumes:
+      - .:/app
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: public.ecr.aws/docker/library/postgres:17-alpine
+    container_name: fastapi_selic_db
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+    volumes:
+      - selic-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d selic"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  db-admin:
+    image: dpage/pgadmin4
+    container_name: fastapi_selic_db_admin
+    ports:
+      - "5050:80"
+    environment:
+      - "PGADMIN_DEFAULT_EMAIL=admin@admin.com"
+      - "PGADMIN_DEFAULT_PASSWORD=admin"
+    restart: always
+    depends_on:
+      - db
+
+  storage:
+    image: dxflrs/garage:v2.3.0
+    container_name: fastapi_selic_storage
+    command: ["/garage", "server", "--single-node", "--default-bucket"]
+    ports:
+      - "3900:3900" # S3 API
+      - "3902:3902" # Admin API
+    volumes:
+      - selic-garage-data:/var/lib/garage/data
+      - selic-garage-meta:/var/lib/garage/meta
+      - ./config/garage.toml:/etc/garage.toml
+    env_file:
+      - .env
+
+  metabase:
+    image: metabase/metabase:latest
+    container_name: fastapi_selic_metabase
+    ports:
+      - "3000:3000"
+    environment:
+      # Banco de metadados do próprio Metabase (H2 embutido — ok para dev)
+      MB_DB_TYPE: h2
+      MB_DB_FILE: /metabase-data/metabase.db
+      # Fuso horário
+      JAVA_TIMEZONE: America/Sao_Paulo
+    volumes:
+      - selic-metabase-data:/metabase-data
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: fastapi_selic_mlflow
+    ports:
+      - "5001:5000"
+    environment:
+      - AWS_ACCESS_KEY_ID=${S3_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${S3_SECRET_KEY}
+      - MLFLOW_S3_ENDPOINT_URL=${S3_ENDPOINT_URL}
+    entrypoint: /bin/bash
+    command: >
+      -c "pip install psycopg2-binary boto3 && mlflow server
+      --backend-store-uri postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      --default-artifact-root s3://selic_data/mlflow/
+      --host 0.0.0.0 --allowed-hosts mlflow:5000,mlflow,localhost:5001"
+    depends_on:
+      db:
+        condition: service_healthy
+      storage:
+        condition: service_started
+
+volumes:
+  selic-postgres-data:
+  selic-garage-data:
+  selic-garage-meta:
+  selic-metabase-data:

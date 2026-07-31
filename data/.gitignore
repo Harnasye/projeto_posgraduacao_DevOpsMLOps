@@ -1,0 +1,68 @@
+# === Ambiente e segredos ===
+.env
+.env.*
+!.env.example
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# === Dados locais (baixados/gerados pelo pipeline) ===
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# === DVC ===
+# O DVC versiona os dados via hash nos arquivos .dvc (esses SIM vão pro git).
+# O conteúdo real dos dados fica no cache local, que não deve ser versionado.
+/data/raw/*
+/data/processed/*
+.dvc/cache
+.dvc/tmp
+.dvc/*.lock
+
+# === Logs ===
+*.log
+logs/
+
+# === Testes e cobertura ===
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# === Bancos de dados locais / volumes ===
+*.sqlite3
+*.db
+
+# === MLflow (artefatos locais, se rodar fora do container) ===
+mlruns/
+mlartifacts/
+
+# === Editor / IDE ===
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# === Sistema Operacional ===
+.DS_Store
+Thumbs.db
+
+# === Garage S3 (dados locais de storage, se rodar fora de volume) ===
+garage-data/
+garage-meta/

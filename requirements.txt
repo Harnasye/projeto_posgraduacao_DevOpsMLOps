@@ -1,0 +1,25 @@
+fastapi
+uvicorn
+
+# Manipulação e transformação de dados (série temporal da Selic)
+pandas
+pyarrow
+
+# Banco de dados PostgreSQL
+psycopg2-binary
+sqlalchemy
+
+# Object Storage (S3 API compatível — Garage)
+boto3
+
+# HTTP client para consumir a API do Banco Central (SGS)
+requests
+
+# Linting e Testes (Geralmente em um requirements-dev.txt separado, mas mantido aqui para simplificar)
+pytest
+httpx
+ruff
+mlflow
+dvc[s3]
+scikit-learn
+great_expectations>=1.0.0
