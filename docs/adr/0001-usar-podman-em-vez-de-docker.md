@@ -6,7 +6,7 @@
 
 ## Contexto
 
-O projeto precisa de um runtime de containers OCI para construir e executar o pipeline de dados localmente.
+O projeto precisa de um runtime de containers OCI para construir e executar o pipeline de previsão da Taxa Selic localmente.
 As duas opções mais populares no mercado são **Docker** e **Podman**.
 
 Em ambientes corporativos e educacionais, a segurança e a simplicidade operacional são prioritárias.

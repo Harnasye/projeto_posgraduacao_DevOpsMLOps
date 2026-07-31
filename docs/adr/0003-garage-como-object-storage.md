@@ -6,8 +6,8 @@
 
 ## Contexto
 
-O pipeline de dados precisa de um object storage compatível com a API S3 para armazenar artefatos brutos
-(arquivos `.zip` da Receita Federal) e dados processados (arquivos `.parquet`). Esse storage simula um
+O pipeline de dados precisa de um object storage compatível com a API S3 para armazenar snapshots brutos
+da série histórica da Selic (`.csv`) e as features processadas (`.parquet`). Esse storage simula um
 data lake local durante o desenvolvimento, antes de migrar para soluções cloud (AWS S3, GCS, Azure Blob).
 
 As opções avaliadas foram:
@@ -29,7 +29,8 @@ Adotamos **Garage** como object storage S3-compatível para desenvolvimento loca
 2. **Leve e rápido:** Binário único, sem JVM, sem dependências pesadas. Ideal para subir via compose
    em segundos.
 3. **Projetado para edge/self-hosted:** Diferente do MinIO (focado em enterprise), Garage é projetado
-   para cenários de baixo recurso — perfeito para ambiente de desenvolvimento local.
+   para cenários de baixo recurso — perfeito para ambiente de desenvolvimento local, especialmente
+   com um dataset pequeno como o da série histórica da Selic.
 4. **Ativo e mantido:** Projeto open-source ativo, com releases regulares e documentação clara.
 5. **Configuração simples:** Um único container com variáveis de ambiente para credenciais e porta.
 
@@ -44,6 +45,8 @@ Adotamos **Garage** como object storage S3-compatível para desenvolvimento loca
 - Garage não suporta todas as features avançadas do S3 (ex: lifecycle policies, versioning avançado).
 - Menor comunidade e ecossistema comparado ao MinIO (historicamente).
 - Requer configuração inicial de cluster (mesmo que single-node para dev).
+- Nomes de bucket devem seguir a especificação S3 estritamente (letras minúsculas, números e hífen);
+  o Garage rejeita nomes com underscore (`_`), diferente de alguns outros storages mais permissivos.
 
 ### Riscos
 - Se o projeto precisar de features S3 avançadas no futuro, pode ser necessário migrar para outra solução.

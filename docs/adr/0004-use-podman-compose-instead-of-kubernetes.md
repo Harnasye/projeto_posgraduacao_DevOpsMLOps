@@ -4,10 +4,10 @@
 Aceito
 
 ## Contexto
-O projeto avalia pipelines de engenharia de dados (Dataops e MLOps). Embora as orientações iniciais mencionem ferramentas como Kubernetes e Kind para orquestração, operar esses clusters consome bastante recurso de máquina e adiciona complexidade desnecessária à fase de ingestão e experimentação. 
+O projeto avalia pipelines de engenharia de dados (DataOps e MLOps). Embora as orientações iniciais mencionem ferramentas como Kubernetes e Kind para orquestração, operar esses clusters consome bastante recurso de máquina e adiciona complexidade desnecessária à fase de ingestão e experimentação.
 
 ## Decisão
-Decidimos utilizar **Podman** e **Podman Compose** para toda a stack local de dados (PostgreSQL, Garage S3, FastAPI, Metabase, MLflow). 
+Decidimos utilizar **Podman** e **Podman Compose** para toda a stack local de dados (PostgreSQL, Garage S3, FastAPI, Metabase, MLflow).
 
 ## Consequências
 - **Positivas**: Redução drástica de uso de RAM e CPU. Ambiente reproduzível mais rápido e familiar aos desenvolvedores.

@@ -9,21 +9,22 @@
 > [!NOTE]
 > Este repositório utiliza ferramentas de Inteligência Artificial para apoiar seu desenvolvimento. Durante as aulas para fins educativos, testamos as habilidades de "Vibe Code" e exploramos a preparação do repositório orientada a **Spec Driven Development**.
 
-Repositório base para o curso de **DevOps e MLOps Aplicado a Engenharia de Dados**.
-Pipeline completo de dados públicos de CNPJ da Receita Federal — da ingestão ao analytics.
+Repositório base para o projeto da disciplina de **DevOps e MLOps Aplicado a Engenharia de Dados**.
+Pipeline completo de dados públicos da Taxa Selic (Banco Central) — da ingestão à previsão.
 
 ---
 
 ## 🎯 Objetivo do Projeto
 
 Criar um pipeline de dados completo e robusto que:
-1. Descobre e baixa os dados públicos de CNPJ da Receita Federal (discovery + sync).
-2. Transforma CSVs brutos em Parquet otimizado (transform).
-3. Carrega dados no PostgreSQL via COPY para consulta e analytics (load-db).
-4. Persiste ZIPs originais e Parquets processados no Garage S3 em camadas (load-s3).
-5. Expõe API REST (FastAPI) para controle de todo o pipeline.
-6. Oferece dashboards via Metabase conectado ao PostgreSQL.
-7. É orquestrado e conteinerizado localmente com Podman e Podman-Compose.
+1. Verifica disponibilidade e sincroniza a série histórica da Taxa Selic via API do Banco Central (SGS).
+2. Constrói features de série temporal (lags + médias móveis) a partir dos dados sincronizados (transform).
+3. Carrega as features no PostgreSQL para consulta e analytics (load-db).
+4. Persiste snapshots brutos e features processadas no Garage S3 em camadas (load-s3).
+5. Expõe API REST (FastAPI) para controle de todo o pipeline e consulta do histórico.
+6. Treina um modelo de regressão (RandomForest) para prever o próximo valor da Selic, rastreado via MLflow.
+7. Oferece dashboards via Metabase conectado ao PostgreSQL.
+8. É orquestrado e conteinerizado localmente com Podman e Podman-Compose.
 
 ---
 
@@ -31,24 +32,22 @@ Criar um pipeline de dados completo e robusto que:
 
 ```text
 ┌──────────────────┐
-│  Receita Federal │
-│   (WebDAV/HTTP)  │
+│  Banco Central   │
+│  API SGS (REST)  │
 └────────┬─────────┘
          │ discovery + sync
          ▼
 ┌──────────────────┐     ┌─────────────────────────────────────┐
-│  /tmp/data/raw/  │────▶│  Garage S3 (cnpj-data bucket)       │
-│   *.zip (staging)│     │  ├── raw/{ym}/*.zip       (imutável)│
-└────────┬─────────┘     │  └── processed/{ym}/*.parquet       │
+│  /tmp/data/raw/  │────▶│  Garage S3 (selic-data bucket)      │
+│  selic_serie.csv │     │  ├── raw/selic/*.csv     (snapshot) │
+└────────┬─────────┘     │  └── processed/selic/*.parquet      │
          │ transform     └─────────────────────────────────────┘
          ▼
 ┌──────────────────┐     ┌─────────────────────┐
 │  /tmp/processed/ │────▶│  PostgreSQL 17       │
-│   *.parquet      │     │  cnpj_empresas       │
-│  (staging)       │     │  cnpj_estabelecim... │
-└──────────────────┘     │  cnpj_socios         │
-                         │  cnpj_simples        │
-                         │  + lookups            │
+│  *.parquet       │     │  selic_serie         │
+│  (staging)       │     │  selic_features      │
+└──────────────────┘     │  sync_control        │
                          └────────┬──────────────┘
                                   │
                          ┌────────▼──────────────┐
@@ -58,23 +57,22 @@ Criar um pipeline de dados completo e robusto que:
                          └───────────────────────┘
 ```
 
-> **DVC**: Dados crus em `data/raw/` são versionados usando DVC, com o `Garage S3` como remote de storage (`dvc push/pull`).
-> **MLflow**: Usado para rastrear o treinamento de modelos RandomForest (experimentos, métricas, parâmetros) e gerenciar os artefatos (Model Registry). O FastAPI carrega a versão `latest` do modelo na inicialização.
+> **DVC**: Snapshots brutos em `data/raw/selic/` são versionados usando DVC, com o `Garage S3` como remote de storage (`dvc push/pull`).
+> **MLflow**: Usado para rastrear o treinamento do modelo de regressão (RandomForestRegressor), suas métricas (MAE, RMSE, R²) e gerenciar os artefatos (Model Registry). O FastAPI carrega a versão `latest` do modelo na inicialização.
 
 ---
 
 ## 🏗️ Estrutura do Repositório
 
-```text
-├── .github/workflows/     # 🔜 CI/CD GitHub Actions (Lab 2.1)
+```
 ├── ContainerFile          # Multi-stage build + usuário rootless (appuser)
 ├── Makefile               # Targets para todo o pipeline
-├── compose.yaml           # API, PostgreSQL, Garage S3, Metabase
+├── compose.yaml           # API, PostgreSQL, Garage S3, Metabase, MLflow
 ├── config/garage.toml     # Configuração do Garage S3
 ├── docs/adr/              # Decisões de Arquitetura (ADRs)
-├── k8s/                   # 🔜 Kubernetes Manifests (Lab 2.3)
+├── k8s/                   # 🔜 Kubernetes Manifests (Lab 2.3) — não utilizado, ver ADR 0004
 ├── scripts/
-│   ├── explore_raw.py     # Exploração de dados raw sem modificar
+│   ├── explore_raw.py     # Exploração da série Selic sincronizada, sem modificar
 │   └── init_garage.sh     # Setup manual do Garage (se necessário)
 ├── src/
 │   ├── config.py          # Configurações via variáveis de ambiente (12-Factor)
@@ -83,49 +81,27 @@ Criar um pipeline de dados completo e robusto que:
 │   ├── main.py            # API FastAPI com documentação OpenAPI
 │   ├── utils.py           # Funções utilitárias compartilhadas
 │   ├── jobs/              # Tarefas do pipeline
-│   │   ├── discovery.py   # Descobre dados disponíveis na RF via WebDAV
-│   │   ├── sync.py        # Download com progresso, SHA-256, hash diff
-│   │   ├── transform.py   # CSV → Parquet (chunked, com regras de negócio)
-│   │   ├── load_db.py     # Parquet → PostgreSQL via psycopg2 COPY
+│   │   ├── discovery.py   # Verifica disponibilidade da API do BCB
+│   │   ├── sync.py        # Sincroniza a série histórica da Selic
+│   │   ├── transform.py   # Constrói features de série temporal (lags, médias móveis)
+│   │   ├── load_db.py     # Features → PostgreSQL
 │   │   ├── load_s3.py     # Upload para Garage S3 (raw + processed)
 │   │   ├── data_quality.py# Data Quality com Great Expectations
-│   │   └── train.py       # Pipeline de Treino (RandomForest + MLflow)
+│   │   └── train.py       # Pipeline de Treino (RandomForestRegressor + MLflow)
 │   ├── models/            # SQLAlchemy
 │   │   ├── database.py    # Engine, Session, Base
-│   │   ├── empresa.py     # Model Empresas
-│   │   ├── schema_cnpj.py # Models: Estabelecimentos, Sócios, Simples, Lookups
+│   │   ├── selic.py       # Models: SelicSerie, SelicFeatures
 │   │   └── sync_control.py# Controle de sincronização (estado do pipeline)
 │   └── routers/           # Endpoints HTTP
 │       ├── admin.py       # Dashboard, sync, transform, load-db, load-s3
-│       ├── empresas.py    # Consulta de empresas por CNPJ/razão social
+│       ├── selic.py       # Consulta do histórico da Selic
 │       ├── s3_status.py   # Status do Garage S3 e gap analysis
-│       └── ml_serving.py  # Model Serving (carrega de MLflow no startup)
+│       ├── ml_serving.py  # Model Serving (carrega de MLflow no startup)
+│       └── ml_tracking.py # Gerenciamento de experimentos MLflow
 └── tests/
-    ├── test_unit.py       # Testes unitários (transformação)
+    ├── test_unit.py       # Testes unitários (features de série temporal)
     └── test_e2e.py        # Testes E2E (API endpoints)
 ```
-
----
-
-## ✅ Checklist de Implementação (Labs)
-
-### Aula 1: Fundamentos DevOps e Ingestão de Dados
-- [x] **Lab 1.1**: Multi-stage build e usuário rootless no `ContainerFile`.
-- [x] **Lab 1.2**: Serviços `db`, `storage`, `metabase` no `compose.yaml` com volumes e healthchecks.
-- [x] **Lab 1.3**: `Makefile` completo com targets para todo o pipeline.
-- [x] **Lab 1.4**: Pipeline de ingestão com discovery, sync, transform, load.
-- [x] **Bônus**: ADRs, discovery inteligente da RF, Admin Dashboard via API, hash SHA-256, Metabase.
-
-### Aula 2: CI/CD e Data Quality
-- [x] **Lab 2.1**: Pipelines CI/CD com GitHub Actions (linting, testes, build, Trivy scan).
-- [x] **Lab 2.2**: Data Quality com Great Expectations integrado ao pipeline.
-- [ ] **Lab 2.3**: Deploy em Kubernetes local via Kind. *(Nota: Substituído 100% por Podman Compose, veja ADR 0001).*
-
-### Aula 3: MLOps
-- [x] **Lab 3.1**: Ambiente MLflow via compose para tracking de experimentos.
-- [x] **Lab 3.2**: Ambiente e libs base para Treino de Modelos.
-- [x] **Lab 3.3**: Model Serving conteinerizado como API REST.
-
 ---
 
 ## 💻 Como Iniciar
@@ -134,6 +110,7 @@ Criar um pipeline de dados completo e robusto que:
 - [Podman](https://podman.io/) instalado.
 - [Podman Compose](https://github.com/containers/podman-compose).
 - Make (opcional, porém recomendado).
+- [DVC](https://dvc.org/) (opcional, para versionamento de dados).
 
 ### Pipeline Completo
 
@@ -141,42 +118,43 @@ Criar um pipeline de dados completo e robusto que:
 # 1. Subir todos os serviços
 make up
 
-# 2. Descobrir dados disponíveis na Receita Federal
+# 2. Verificar disponibilidade da API do Banco Central
 make discover
 
-# 3. Sincronizar (baixar) dados de um mês
-make sync MONTH=2026-04
+# 3. Sincronizar a série histórica da Selic
+# Atenção: a API do BCB limita consultas a intervalos de até 10 anos por chamada
+make sync START=01/01/2015 END=31/12/2025
 
-# 4. Transformar CSVs em Parquet
-make transform MONTH=2026-04
+# 4. Construir as features de série temporal (lags + média móvel)
+make transform
 
-# 5. Carregar no PostgreSQL
-make load-db MONTH=2026-04
+# 5. Carregar as features no PostgreSQL
+make load-db
 
 # 6. Upload para Garage S3 (raw + processed)
-make load-s3 MONTH=2026-04
+make load-s3
 
 # 7. Rodar Data Quality Checks
 make data-quality
 
-# 8. Treinar modelo com MLflow
-podman compose exec api python -m src.jobs.train
+# 8. Treinar o modelo de previsão com MLflow
+make train
 ```
 
 ### Monitoramento
 
 ```bash
 # Status do transform
-make transform-status MONTH=2026-04
+make transform-status
 
 # Status da carga PostgreSQL
-make load-db-status MONTH=2026-04
+make load-db-status
 
 # Listar objetos no S3
-make s3-list PREFIX=raw/2026-04/
+make s3-list PREFIX=raw/selic/
 
-# Verificar integridade dos downloads
-make verify MONTH=2026-04
+# Dashboard de sincronizações
+curl -s http://localhost:8000/admin/sync | python3 -m json.tool
 ```
 
 ### Acessos
@@ -185,7 +163,7 @@ make verify MONTH=2026-04
 |---|---|
 | **API (Swagger UI)** | http://localhost:8000/docs |
 | **Metabase** | http://localhost:3000 |
-| **PostgreSQL** | `localhost:5432` (user: postgres, db: cnpj) |
+| **PostgreSQL** | `localhost:5432` (user: postgres, db: selic) |
 | **Garage S3** | `localhost:3900` |
 | **MLflow** | http://localhost:5001 |
 
@@ -196,17 +174,18 @@ make verify MONTH=2026-04
 | Método | Endpoint | Descrição |
 |---|---|---|
 | `GET` | `/admin/sync` | Dashboard de sincronização |
-| `POST` | `/admin/sync/discover` | Descobrir dados na RF |
-| `POST` | `/admin/sync/{ym}` | Sincronizar mês (background) |
-| `GET` | `/admin/sync/{ym}/diff` | Hash diff: remoto vs local |
-| `POST` | `/admin/transform/{ym}` | Transformar mês inteiro |
-| `GET` | `/admin/transform/{ym}/status` | Status dos Parquets |
-| `POST` | `/admin/load-db/{ym}` | Carregar no PostgreSQL |
-| `GET` | `/admin/load-db/{ym}/status` | Status da carga |
-| `POST` | `/admin/load-s3/{ym}` | Upload S3 (raw + processed) |
+| `POST` | `/admin/sync/discover` | Verificar disponibilidade da API do BCB |
+| `POST` | `/admin/sync?data_inicial=...&data_final=...` | Sincronizar período (background) |
+| `POST` | `/admin/sync/verify` | Verificar integridade local vs API do BCB |
+| `POST` | `/admin/transform` | Construir features de série temporal |
+| `GET` | `/admin/transform/status` | Status das features transformadas |
+| `POST` | `/admin/load-db` | Carregar features no PostgreSQL |
+| `POST` | `/admin/load-s3` | Upload S3 (raw + processed) |
 | `GET` | `/s3/objects` | Listar objetos no bucket |
-| `GET` | `/empresas/search?razao_social=...` | Buscar empresas |
-| `POST` | `/predict/` | Predição (Optante pelo Simples) via modelo carregado do MLflow |
+| `GET` | `/selic/historico` | Histórico recente da Selic |
+| `GET` | `/selic/ultimo` | Último valor sincronizado |
+| `GET` | `/selic/periodo?data_inicial=...&data_final=...` | Busca por intervalo de datas |
+| `POST` | `/predict/` | Previsão do próximo valor da Selic via modelo carregado do MLflow |
 
 Documentação completa com exemplos: **http://localhost:8000/docs**
 
@@ -219,12 +198,19 @@ Consulte os ADRs em `docs/adr/`:
 - [ADR 0002](docs/adr/0002-estrutura-api-e-jobs-batch.md) — Estrutura API + Jobs batch
 - [ADR 0003](docs/adr/0003-garage-como-object-storage.md) — Garage como Object Storage
 - [ADR 0004](docs/adr/0004-use-podman-compose-instead-of-kubernetes.md) — Podman em vez de Kubernetes
-- [ADR 0005](docs/adr/0005-use-pyarrow-for-large-files.md) — Chunking com PyArrow para arquivos massivos
+- [ADR 0005](docs/adr/0005-use-pyarrow-for-large-files.md) — Processamento de dados (contexto histórico do dataset CNPJ)
 - [ADR 0006](docs/adr/0006-use-great-expectations-for-data-quality.md) — Validação de qualidade com Great Expectations
 - [ADR 0007](docs/adr/0007-estrategia-de-versionamento-de-dados-dvc.md) — Estratégia de Versionamento com DVC
 - [ADR 0008](docs/adr/0008-estrategia-de-model-serving.md) — Estratégia de Model Serving com MLflow
 
+---
+
+## ⚠️ Notas sobre a API do Banco Central (SGS)
+
+- Consultas por período são **limitadas a 10 anos** por chamada — intervalos maiores retornam erro HTTP 406. O `sync.py` deve ser chamado em blocos de até 10 anos.
+- Períodos sem dados disponíveis podem retornar uma resposta HTTP 200 com corpo vazio, em vez de uma lista JSON vazia — o job de sync trata esse caso como "sem dados", não como erro.
+- Documentação oficial: [dadosabertos.bcb.gov.br](https://dadosabertos.bcb.gov.br/)
 
 ---
 
-> 💡 **Dica**: Use `make help` para ver todos os targets disponíveis no Makefile.
+> 💡 **OBS**: Use `make help` para ver todos os targets disponíveis no Makefile.
