@@ -1,0 +1,7 @@
+[core]
+    remote = garage-storage
+['remote "garage-storage"']
+    url = s3://selic-data/dvc-storage
+    endpointurl = http://storage:3900
+    access_key_id = GK000000000000000000000000
+    secret_access_key = minioadmin_secretkey
