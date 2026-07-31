@@ -1,4 +1,4 @@
-.PHONY: help build up down test clean clean-volumes discover sync ingest logs lint format s3-status s3-list transform transform-status load-db load-db-status load-s3 train data-quality
+.PHONY: help build up down test clean clean-volumes discover sync ingest logs lint format s3-status s3-list transform transform-status load-db load-db-status load-s3 train data-quality dvc-setup dvc-snapshot dvc-pull
 .DEFAULT_GOAL := help
 
 # Detecta se podman está disponível, caso contrário usa docker (útil para CI)
@@ -55,11 +55,11 @@ discover: ## Verifica disponibilidade da série Selic na API do Banco Central
 	@echo "🔍 Verificando disponibilidade da série Selic (BCB)..."
 	$(COMPOSE_CMD) exec api python -m src.jobs.discovery
 
-sync: ## Sincroniza a série Selic (ex: make sync START=01/01/2020 END=31/12/2025)
+sync: ## Sincroniza a série Selic (ex: make sync START=01/01/2015 END=31/12/2024). Limite de 10 anos por chamada — o job divide em blocos automaticamente.
 	@echo "📥 Sincronizando série Selic de $(START) a $(END)..."
 	$(COMPOSE_CMD) exec api python -m src.jobs.sync --data-inicial $(START) --data-final $(END)
 
-ingest: ## Executa o pipeline completo (ex: make ingest START=01/01/2020 END=31/12/2025)
+ingest: ## Executa o pipeline completo (ex: make ingest START=01/01/2015 END=31/12/2024)
 	@echo "⚙️ Executando pipeline completo..."
 	$(COMPOSE_CMD) exec api python -m src.ingest --data-inicial $(START) --data-final $(END)
 
@@ -82,6 +82,36 @@ load-db-status: ## Status da carga PostgreSQL
 load-s3: ## Upload de snapshot raw + features processadas para o Garage S3
 	@echo "☁️  Disparando upload S3..."
 	@curl -s -X POST "http://localhost:8000/admin/load-s3" | python3 -m json.tool
+
+dvc-setup: ## Inicializa o DVC (se necessário) e configura o remote no Garage S3
+	@echo "🗂️  Configurando DVC e remote no Garage S3..."
+	@if [ ! -d .dvc ]; then \
+		echo "  → .dvc não encontrado, inicializando..."; \
+		$(COMPOSE_CMD) exec -u root api dvc init; \
+	else \
+		echo "  → .dvc já existe, pulando inicialização."; \
+	fi
+	$(COMPOSE_CMD) exec -u root api dvc remote add -d -f garage-storage s3://selic-data/dvc-storage
+	$(COMPOSE_CMD) exec -u root api dvc remote modify garage-storage endpointurl http://storage:3900
+	$(COMPOSE_CMD) exec -u root api sh -c 'dvc remote modify --local garage-storage access_key_id "$$S3_ACCESS_KEY"'
+	$(COMPOSE_CMD) exec -u root api sh -c 'dvc remote modify --local garage-storage secret_access_key "$$S3_SECRET_KEY"'
+	$(COMPOSE_CMD) exec -u root api chown -R $$(id -u):$$(id -g) .dvc
+	@echo "✅ DVC configurado. Rode 'make dvc-snapshot' após sincronizar os dados."
+
+dvc-snapshot: ## Copia o snapshot raw (gerado pelo load-s3) para dentro do repo e versiona com DVC
+	@echo "📸 Versionando snapshot raw da série Selic com DVC..."
+	$(COMPOSE_CMD) exec -u root api mkdir -p data/raw/selic
+	$(COMPOSE_CMD) exec -u root api cp /tmp/data/raw/selic/selic_serie.csv data/raw/selic/selic_serie.csv
+	$(COMPOSE_CMD) exec -u root api chown -R $$(id -u):$$(id -g) data/raw
+	$(COMPOSE_CMD) exec -u root api dvc add data/raw/selic
+	$(COMPOSE_CMD) exec -u root api dvc push
+	$(COMPOSE_CMD) exec -u root api chown -R $$(id -u):$$(id -g) .dvc data
+	@echo "✅ Snapshot versionado e enviado para o Garage S3."
+	@echo "ℹ️  Não esqueça de rodar: git add data/raw/selic.dvc data/raw/.gitignore && git commit"
+
+dvc-pull: ## Baixa os dados versionados pelo DVC a partir do Garage S3 (útil após clonar o repo)
+	@echo "⬇️  Baixando dados versionados via DVC..."
+	$(COMPOSE_CMD) exec api dvc pull
 
 train: ## Treina o modelo de previsão da Selic e registra no MLflow
 	@echo "🤖 Treinando modelo de previsão da Selic..."

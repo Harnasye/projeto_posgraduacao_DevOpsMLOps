@@ -30,17 +30,20 @@ def test_build_features_lags_e_target():
     df = df.dropna().reset_index(drop=True)
 
     # Validações
-    # 1. A primeira linha válida (após dropna) deve ter lag_1 = valor do dia anterior
+    # A primeira linha válida corresponde ao índice original 3 (valor=11.5),
+    # pois é a primeira posição em que lag_3 (que exige 3 posições anteriores)
+    # deixa de ser nulo.
     primeira_linha = df.iloc[0]
-    assert primeira_linha["lag_1"] == 12.0  # dia anterior ao 4º dia útil válido
-    assert primeira_linha["lag_2"] == 11.5
-    assert primeira_linha["lag_3"] == 11.0
+    assert primeira_linha["valor"] == 11.5
+    assert primeira_linha["lag_1"] == 11.0
+    assert primeira_linha["lag_2"] == 10.5
+    assert primeira_linha["lag_3"] == 10.0
 
-    # 2. O target deve ser sempre o valor do próximo dia
+    # O target deve ser sempre o valor do próximo dia
     for i in range(len(df) - 1):
         assert df.iloc[i]["target"] == df.iloc[i + 1]["valor"]
 
-    # 3. Não deve haver nenhum valor nulo após o dropna
+    # Não deve haver nenhum valor nulo após o dropna
     assert df.isna().sum().sum() == 0
 
 

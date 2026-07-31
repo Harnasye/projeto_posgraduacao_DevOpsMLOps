@@ -30,6 +30,7 @@ def sync_selic(db: Session, data_inicial: str, data_final: str) -> dict:
     intervalos maiores são automaticamente divididos em blocos de até 10 anos.
     """
     from datetime import datetime, timedelta
+    import time
 
     dt_inicial = datetime.strptime(data_inicial, "%d/%m/%Y")
     dt_final = datetime.strptime(data_final, "%d/%m/%Y")
@@ -53,18 +54,37 @@ def sync_selic(db: Session, data_inicial: str, data_final: str) -> dict:
             f"?formato=json&dataInicial={bloco_inicial_str}&dataFinal={bloco_final_str}"
         )
 
-        response = requests.get(url, timeout=60)
-        response.raise_for_status()
+        max_tentativas = 3
+        dados = None
 
-        if not response.text.strip():
-            logger.warning(
-                f"API retornou vazio para o bloco {bloco_inicial_str} a {bloco_final_str} — "
-                "sem dados nesse intervalo, pulando para o próximo bloco."
-            )
-            cursor = bloco_final + timedelta(days=1)
-            continue
+        for tentativa in range(1, max_tentativas + 1):
+            try:
+                response = requests.get(url, timeout=60)
+                response.raise_for_status()
 
-        dados = response.json()
+                if not response.text.strip():
+                    logger.warning(
+                        f"API retornou vazio para o bloco {bloco_inicial_str} a {bloco_final_str} "
+                        f"(tentativa {tentativa}/{max_tentativas})."
+                    )
+                    dados = []
+                    break
+
+                dados = response.json()
+                break
+
+            except (requests.exceptions.RequestException, ValueError) as e:
+                logger.warning(
+                    f"Falha na tentativa {tentativa}/{max_tentativas} para o bloco "
+                    f"{bloco_inicial_str} a {bloco_final_str}: {e}"
+                )
+                if tentativa == max_tentativas:
+                    raise DataDiscoveryError(
+                        f"Falha ao consultar API do BCB após {max_tentativas} tentativas "
+                        f"para o bloco {bloco_inicial_str} a {bloco_final_str}: {e}"
+                    )
+                time.sleep(3)
+
         total_recebidos += len(dados)
 
         for item in dados:
