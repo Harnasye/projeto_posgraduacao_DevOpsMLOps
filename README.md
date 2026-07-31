@@ -114,6 +114,14 @@ Criar um pipeline de dados completo e robusto que:
 
 > DVC roda **dentro do container** da API (já incluso no `requirements.txt`) — não é necessário instalar nada extra no host para usá-lo.
 
+### Configuração inicial
+
+Copie o arquivo de exemplo e ajuste se necessário (os valores padrão já funcionam para ambiente local):
+
+```bash
+cp .env.example .env
+```
+
 ### Pipeline Completo
 
 ```bash
@@ -150,6 +158,50 @@ make data-quality
 # 9. Treinar o modelo de previsão com MLflow
 make train
 ```
+
+### Testando a Previsão
+
+Após rodar `make train`, reinicie a API para que ela carregue a versão mais recente do modelo:
+
+```bash
+podman compose restart api
+```
+
+Aguarde alguns segundos e teste o endpoint de previsão, enviando valores de exemplo como features:
+
+```bash
+curl -s -X POST http://localhost:8000/predict/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "lag_1": 10.75,
+    "lag_2": 10.75,
+    "lag_3": 10.75,
+    "lag_4": 10.75,
+    "lag_5": 10.50,
+    "media_movel_7": 10.68
+  }' | python3 -m json.tool
+```
+
+A resposta esperada é algo como:
+
+```json
+{
+    "valor_previsto": 10.74,
+    "message": "Predição realizada com sucesso."
+}
+```
+
+> 💡 Você também pode testar pelo Swagger UI (http://localhost:8000/docs), procurando o endpoint `POST /predict/` e usando o botão "Try it out" — mais visual e sem precisar do terminal.
+
+**Usando dados reais em vez dos valores de exemplo:** os valores acima são fictícios, apenas para validar que o endpoint responde. Para obter uma previsão baseada no estado real e atual da série, consulte primeiro o histórico:
+
+```bash
+curl -s "http://localhost:8000/selic/historico?limit=10" | python3 -m json.tool
+```
+
+Isso retorna os últimos valores reais sincronizados, do mais recente para o mais antigo. Monte o payload usando esses valores na ordem correta (`lag_1` = valor mais recente, `lag_2` = valor anterior a esse, e assim por diante) e calcule `media_movel_7` como a média aritmética dos 7 valores mais recentes.
+
+---
 
 ### Depois de clonar o repositório (setup em nova máquina)
 
@@ -235,6 +287,7 @@ Consulte os ADRs em `docs/adr/`:
 ## 🔧 Solução de Problemas Comuns
 
 - **`Permission denied` ao rodar comandos DVC/Git dentro do container**: use `podman compose exec -u root api <comando>` e, ao final, restaure a propriedade dos arquivos com `podman compose exec -u root api chown -R $(id -u):$(id -g) <pasta>`.
+- **`repository path '/app' is not owned by current user` ao rodar `dvc`/`git`**: rode `podman compose exec -u root api git config --global --add safe.directory /app` uma vez, para autorizar o diretório.
 - **API demorando minutos para responder após `make up`**: normalmente indica que o MLflow ainda não está pronto e a API está tentando carregar o modelo repetidamente. Confirme que o serviço `mlflow` está `healthy` com `podman compose ps` antes de considerar a API travada.
 - **Erro de memória (`exit status 137`) em `make data-quality` ou outros comandos pesados**: aumente a memória da VM do Podman, por exemplo `podman machine set --memory 10240` (ajuste conforme a RAM disponível na sua máquina).
 
